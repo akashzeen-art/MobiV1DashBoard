@@ -28,12 +28,15 @@ function DataRow({ label, total, values, isCR }) {
 
 export default function CampaignTable({ campaign, onCutChange }) {
   const selectRef = useRef(null);
-  const { clicks, conversions } = parseHourlyData(campaign.hourlyData);
+  const { clicks, conversions, stp } = parseHourlyData(campaign.hourlyData);
 
   const totalC = clicks.reduce((a, b) => a + b, 0);
   const totalConv = conversions.reduce((a, b) => a + b, 0);
+  const totalSTP = stp.reduce((a, b) => a + b, 0);
   const totalCR = calcCR(totalConv, totalC);
+  const totalStpCR = calcCR(totalSTP, totalC);
   const crVals = clicks.map((c, i) => calcCR(conversions[i], c));
+  const stpCRVals = clicks.map((c, i) => calcCR(stp[i], c));
 
   function handleCutChange(e) {
     const newValue = e.target.value;
@@ -74,12 +77,12 @@ export default function CampaignTable({ campaign, onCutChange }) {
         <div className="metadata-item">
           <strong>Pub Link:</strong>
           <a
-            href={`https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&clickid=clickid`}
+            href={`https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&click=clickid`}
             target="_blank"
             rel="noreferrer"
             className="clickable-link"
           >
-            {`https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&clickid=clickid`}
+            {`https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&click=clickid`}
           </a>
         </div>
       </div>
@@ -96,6 +99,8 @@ export default function CampaignTable({ campaign, onCutChange }) {
             <DataRow label="Clicks" total={totalC} values={clicks} />
             <DataRow label="Conversion" total={totalConv} values={conversions} />
             <DataRow label="CR" total={totalCR} values={crVals} isCR />
+            <DataRow label="STP" total={totalSTP} values={stp} />
+            <DataRow label="STP CR" total={totalStpCR} values={stpCRVals} isCR />
           </tbody>
         </table>
       </div>

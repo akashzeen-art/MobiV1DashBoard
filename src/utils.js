@@ -20,6 +20,7 @@ export function formatDateDisplay(dateString) {
 export function parseHourlyData(hourlyData) {
   const clicks = new Array(24).fill(0);
   const conversions = new Array(24).fill(0);
+  const stp = new Array(24).fill(0);
   (hourlyData || []).forEach(item => {
     const match = String(item.hour ?? '').trim().match(/^(\d{1,2}):\d{2}/);
     if (!match) return;
@@ -27,8 +28,9 @@ export function parseHourlyData(hourlyData) {
     if (h < 0 || h >= 24) return;
     clicks[h] += parseInt(item.clicks ?? item.click ?? item.Clicks ?? 0, 10) || 0;
     conversions[h] += parseInt(item.conversions ?? item.conversion ?? item.Conversions ?? 0, 10) || 0;
+    stp[h] += parseInt(item.stp ?? item.STP ?? item.sendToPartner ?? 0, 10) || 0;
   });
-  return { clicks, conversions };
+  return { clicks, conversions, stp };
 }
 
 export function groupDataByDate(data) {
@@ -69,16 +71,25 @@ function hourHeaders() {
 }
 
 function buildCSVRows(campaign) {
-  const { clicks, conversions } = parseHourlyData(campaign.hourlyData);
+  const { clicks, conversions, stp } = parseHourlyData(campaign.hourlyData);
   const totalC = clicks.reduce((a, b) => a + b, 0);
   const totalConv = conversions.reduce((a, b) => a + b, 0);
+  const totalSTP = stp.reduce((a, b) => a + b, 0);
   const totalCR = totalC > 0 ? ((totalConv / totalC) * 100).toFixed(2) : '0.00';
+  const totalStpCR = totalC > 0 ? ((totalSTP / totalC) * 100).toFixed(2) : '0.00';
   const d = escapeCSV(campaign.dspName);
   const id = escapeCSV(campaign.campaignId);
   const l = escapeCSV(campaign.links);
   const row = (label, total, vals) => `${d},${id},${l},${label},${total},${vals.join(',')}\n`;
   const crVals = clicks.map((c, i) => c > 0 ? ((conversions[i] / c) * 100).toFixed(2) + '%' : '0.00%');
-  return row('Clicks', totalC, clicks) + row('Conversion', totalConv, conversions) + row('CR', totalCR + '%', crVals);
+  const stpCRVals = clicks.map((c, i) => c > 0 ? ((stp[i] / c) * 100).toFixed(2) + '%' : '0.00%');
+  return (
+    row('Clicks', totalC, clicks) +
+    row('Conversion', totalConv, conversions) +
+    row('CR', totalCR + '%', crVals) +
+    row('STP', totalSTP, stp) +
+    row('STP CR', totalStpCR + '%', stpCRVals)
+  );
 }
 
 function downloadCSV(content, filename) {
