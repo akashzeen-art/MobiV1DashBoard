@@ -7,7 +7,7 @@ export default function Login({ onLogin }) {
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (email === 'admin@gmail.com' && password === 'Admin@123') {
+    if (email === 'd2c@gmail.com' && password === 'd2c@123') {
       localStorage.setItem('isLoggedIn', 'true');
       localStorage.setItem('loginTime', new Date().toISOString());
       onLogin();
