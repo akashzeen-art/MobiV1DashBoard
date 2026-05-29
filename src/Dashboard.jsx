@@ -3,7 +3,8 @@ import CampaignTable from './CampaignTable';
 import DateExportModal from './DateExportModal';
 import CutConfirmModal from './CutConfirmModal';
 import {
-  API_URL, formatDate, formatDateDisplay,
+  API_URL, PROBE_START, PROBE_END,
+  formatDate, formatDateDisplay,
   groupDataByDate, exportAllCSV, exportDateWiseCSV, updateCutValue,
 } from './utils';
 
@@ -19,25 +20,28 @@ async function apiFetch(start, end) {
   return Array.isArray(data) ? data : (data ? [data] : []);
 }
 
-function getLocalToday() {
-  return formatDate(new Date());
+function offsetDate(base, days) {
+  const d = new Date(base + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return formatDate(d);
 }
 
 export default function Dashboard({ onLogout }) {
-  const localToday = getLocalToday();
-  const [startDate, setStartDate] = useState(localToday);
-  const [endDate, setEndDate] = useState(localToday);
+  const [serverToday, setServerToday] = useState('');
+  const [startDate, setStartDate]     = useState('');
+  const [endDate, setEndDate]         = useState('');
   const [activeFilter, setActiveFilter] = useState('today');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [dateMap, setDateMap] = useState(new Map());
-  const [rawData, setRawData] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState('');
+  const [dateMap, setDateMap]   = useState(new Map());
+  const [rawData, setRawData]   = useState([]);
   const [selectedDSP, setSelectedDSP] = useState('all');
   const [showDateModal, setShowDateModal] = useState(false);
   const [cutModal, setCutModal] = useState(null);
   const [debugOutput, setDebugOutput] = useState('');
 
   async function fetchData(start, end) {
+    if (!start || !end) return;
     setLoading(true);
     setError('');
     try {
@@ -45,7 +49,10 @@ export default function Dashboard({ onLogout }) {
       setRawData(arr);
       setDateMap(groupDataByDate(arr));
       setSelectedDSP('all');
-      setDebugOutput(`=== API RESPONSE ===\nType: ${typeof arr}\nIs Array: ${Array.isArray(arr)}\nCount: ${arr.length}\n\n${JSON.stringify(arr, null, 2)}`);
+      setDebugOutput(
+        `Range: ${start} → ${end}\nTotal records: ${arr.length}\nDSPs: ${[...new Set(arr.map(c => c.dspName))].join(', ')}\n\n` +
+        JSON.stringify(arr, null, 2)
+      );
     } catch (e) {
       setError(e.message);
       setDebugOutput(`Error: ${e.message}\n\n${e.stack || ''}`);
@@ -54,24 +61,44 @@ export default function Dashboard({ onLogout }) {
     }
   }
 
+  // On mount: probe full range to find the server's latest date, then load that day
   useEffect(() => {
-    fetchData(localToday, localToday);
+    async function init() {
+      setLoading(true);
+      try {
+        const all   = await apiFetch(PROBE_START, PROBE_END);
+        const dates = all.map(c => c.date).filter(Boolean).sort();
+        const latest = dates.length > 0 ? dates[dates.length - 1] : formatDate(new Date());
+
+        setServerToday(latest);
+        setStartDate(latest);
+        setEndDate(latest);
+
+        const arr = await apiFetch(latest, latest);
+        setRawData(arr);
+        setDateMap(groupDataByDate(arr));
+        setDebugOutput(
+          `Server today: ${latest}\nTotal records: ${arr.length}\nDSPs: ${[...new Set(arr.map(c => c.dspName))].join(', ')}\n\n` +
+          JSON.stringify(arr, null, 2)
+        );
+      } catch (e) {
+        setError(e.message);
+        setDebugOutput(`Init error: ${e.message}`);
+      } finally {
+        setLoading(false);
+      }
+    }
+    init();
   }, []);
 
-  function offsetDate(base, days) {
-    const d = new Date(base + 'T00:00:00');
-    d.setDate(d.getDate() + days);
-    return formatDate(d);
-  }
-
   function applyQuickFilter(filter) {
+    if (!serverToday) return;
     setActiveFilter(filter);
-    const base = localToday;
     let s, e;
-    if (filter === 'today')          { s = e = base; }
-    else if (filter === 'yesterday') { s = e = offsetDate(base, -1); }
-    else if (filter === '7days')     { s = offsetDate(base, -6); e = base; }
-    else if (filter === '1month')    { s = offsetDate(base, -29); e = base; }
+    if      (filter === 'today')     { s = e = serverToday; }
+    else if (filter === 'yesterday') { s = e = offsetDate(serverToday, -1); }
+    else if (filter === '7days')     { s = offsetDate(serverToday, -6);  e = serverToday; }
+    else if (filter === '1month')    { s = offsetDate(serverToday, -29); e = serverToday; }
     setStartDate(s);
     setEndDate(e);
     fetchData(s, e);
@@ -82,9 +109,10 @@ export default function Dashboard({ onLogout }) {
     fetchData(startDate, endDate);
   }
 
+  // Derive display data
   const allCampaigns = [];
   dateMap.forEach(group => group.forEach(c => allCampaigns.push(c)));
-  const uniqueDSPs = [...new Set(allCampaigns.map(c => c.dspName).filter(Boolean))];
+  const uniqueDSPs = [...new Set(allCampaigns.map(c => c.dspName).filter(Boolean))].sort();
 
   const filteredDateMap = new Map();
   dateMap.forEach((group, date) => {
@@ -94,6 +122,8 @@ export default function Dashboard({ onLogout }) {
     if (filtered.length > 0) filteredDateMap.set(date, filtered);
   });
   const sortedDates = [...filteredDateMap.keys()].sort();
+
+  const exportDates = [...new Set(rawData.map(c => c.date).filter(Boolean))].sort();
 
   function handleCutChange(campaign, newValue, oldValue, selectEl) {
     setCutModal({ campaign, newValue, oldValue, selectEl });
@@ -116,8 +146,6 @@ export default function Dashboard({ onLogout }) {
     if (cutModal?.selectEl) cutModal.selectEl.value = cutModal.oldValue;
     setCutModal(null);
   }
-
-  const exportDates = [...new Set(rawData.map(c => c.date).filter(Boolean))].sort();
 
   return (
     <div className="dashboard-container">
@@ -142,9 +170,11 @@ export default function Dashboard({ onLogout }) {
         </div>
 
         <div className="quick-filters">
-          {[['today', 'Today'], ['yesterday', 'Yesterday'], ['7days', '7 Days'], ['1month', '1 Month']].map(([f, label]) => (
-            <button key={f} className={`quick-filter-btn${activeFilter === f ? ' active' : ''}`}
-              onClick={() => applyQuickFilter(f)}>{label}</button>
+          {[['today','Today'],['yesterday','Yesterday'],['7days','7 Days'],['1month','1 Month']].map(([f, label]) => (
+            <button key={f}
+              className={`quick-filter-btn${activeFilter === f ? ' active' : ''}`}
+              onClick={() => applyQuickFilter(f)}>{label}
+            </button>
           ))}
         </div>
 
@@ -155,8 +185,10 @@ export default function Dashboard({ onLogout }) {
               <button className={`dsp-filter-btn${selectedDSP === 'all' ? ' active' : ''}`}
                 onClick={() => setSelectedDSP('all')}>All</button>
               {uniqueDSPs.map(dsp => (
-                <button key={dsp} className={`dsp-filter-btn${selectedDSP === dsp ? ' active' : ''}`}
-                  onClick={() => setSelectedDSP(dsp)}>{dsp}</button>
+                <button key={dsp}
+                  className={`dsp-filter-btn${selectedDSP === dsp ? ' active' : ''}`}
+                  onClick={() => setSelectedDSP(dsp)}>{dsp}
+                </button>
               ))}
             </div>
           </div>
@@ -180,7 +212,26 @@ export default function Dashboard({ onLogout }) {
         </div>
       )}
 
-      {error && <div className="error-banner">{error}</div>}
+      {!loading && error && <div className="error-banner">{error}</div>}
+
+      {!loading && !error && sortedDates.length === 0 && (
+        <div className="empty-state">No data available for the selected date range.</div>
+      )}
+
+      {!loading && sortedDates.map(date => (
+        <div key={date} className="date-section">
+          <div className="date-header">
+            <h2>📅 {formatDateDisplay(date)}</h2>
+          </div>
+          {filteredDateMap.get(date).map((campaign, i) => (
+            <CampaignTable
+              key={`${date}__${campaign.dspName}__${campaign.campaignId}__${i}`}
+              campaign={campaign}
+              onCutChange={handleCutChange}
+            />
+          ))}
+        </div>
+      ))}
 
       <details className="debug-panel">
         <summary>🔍 Debug: View API Response</summary>
@@ -190,23 +241,6 @@ export default function Dashboard({ onLogout }) {
           <pre className="debug-output">{debugOutput}</pre>
         </div>
       </details>
-
-      {!loading && !error && sortedDates.length === 0 && (
-        <div className="empty-state">No data available for the selected date range.</div>
-      )}
-
-      {sortedDates.map(date => (
-        <div key={date} className="date-section">
-          <div className="date-header"><h2>📅 {formatDateDisplay(date)}</h2></div>
-          {filteredDateMap.get(date).map((campaign, i) => (
-            <CampaignTable
-              key={`${campaign.campaignId}_${campaign.links}_${i}`}
-              campaign={campaign}
-              onCutChange={handleCutChange}
-            />
-          ))}
-        </div>
-      ))}
 
       {showDateModal && (
         <DateExportModal

@@ -6,19 +6,18 @@ const HOURS = Array.from({ length: 24 }, (_, i) =>
 );
 
 function calcCR(conv, clicks) {
-  if (clicks > 0) return ((conv / clicks) * 100).toFixed(2);
-  return '0.00';
+  return clicks > 0 ? ((conv / clicks) * 100).toFixed(2) : '0.00';
 }
 
 function DataRow({ label, total, values, isCR }) {
   return (
     <tr>
       <td style={{ fontWeight: 600 }}>{label}</td>
-      <td style={{ fontWeight: 600, color: isCR ? '#667eea' : undefined, background: isCR ? '#f8f9fa' : undefined }}>
+      <td style={{ fontWeight: 600, color: isCR ? '#667eea' : undefined, background: isCR ? '#f0f2ff' : undefined }}>
         {isCR ? `${total}%` : total}
       </td>
       {values.map((v, i) => (
-        <td key={i} style={{ color: isCR ? '#667eea' : undefined, background: isCR ? '#f8f9fa' : undefined }}>
+        <td key={i} style={{ color: isCR ? '#667eea' : undefined, background: isCR ? '#f0f2ff' : undefined }}>
           {isCR ? `${v}%` : v}
         </td>
       ))}
@@ -30,19 +29,24 @@ export default function CampaignTable({ campaign, onCutChange }) {
   const selectRef = useRef(null);
   const { clicks, conversions, stp } = parseHourlyData(campaign.hourlyData);
 
-  const totalC = clicks.reduce((a, b) => a + b, 0);
-  const totalConv = conversions.reduce((a, b) => a + b, 0);
-  const totalSTP = stp.reduce((a, b) => a + b, 0);
-  const totalCR = calcCR(totalConv, totalC);
-  const totalStpCR = calcCR(totalSTP, totalC);
-  const crVals = clicks.map((c, i) => calcCR(conversions[i], c));
-  const stpCRVals = clicks.map((c, i) => calcCR(stp[i], c));
+  const totalC      = clicks.reduce((a, b) => a + b, 0);
+  const totalConv   = conversions.reduce((a, b) => a + b, 0);
+  const totalSTP    = stp.reduce((a, b) => a + b, 0);
+  const totalCR     = calcCR(totalConv, totalC);
+  const totalStpCR  = calcCR(totalSTP, totalC);
+  const crVals      = clicks.map((c, i) => calcCR(conversions[i], c));
+  const stpCRVals   = clicks.map((c, i) => calcCR(stp[i], c));
+
+  // cut comes from API as string e.g. "0", "10"
+  const cutVal = String(campaign.cut ?? '0');
 
   function handleCutChange(e) {
     const newValue = e.target.value;
-    const oldValue = selectRef.current.getAttribute('data-current-value') || String(campaign.cut ?? 0);
+    const oldValue = selectRef.current.getAttribute('data-current-value') || cutVal;
     onCutChange(campaign, newValue, oldValue, selectRef.current);
   }
+
+  const pubLink = `https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&click=clickid`;
 
   return (
     <div className="campaign-block">
@@ -67,8 +71,8 @@ export default function CampaignTable({ campaign, onCutChange }) {
           <select
             ref={selectRef}
             className="cut-dropdown"
-            defaultValue={String(campaign.cut ?? 0)}
-            data-current-value={String(campaign.cut ?? 0)}
+            defaultValue={cutVal}
+            data-current-value={cutVal}
             onChange={handleCutChange}
           >
             {[0, 10, 20, 30].map(v => <option key={v} value={String(v)}>{v}</option>)}
@@ -76,16 +80,10 @@ export default function CampaignTable({ campaign, onCutChange }) {
         </div>
         <div className="metadata-item">
           <strong>Pub Link:</strong>
-          <a
-            href={`https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&click=clickid`}
-            target="_blank"
-            rel="noreferrer"
-            className="clickable-link"
-          >
-            {`https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&click=clickid`}
-          </a>
+          <a href={pubLink} target="_blank" rel="noreferrer" className="clickable-link">{pubLink}</a>
         </div>
       </div>
+
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
@@ -96,11 +94,11 @@ export default function CampaignTable({ campaign, onCutChange }) {
             </tr>
           </thead>
           <tbody>
-            <DataRow label="Clicks" total={totalC} values={clicks} />
-            <DataRow label="Conversion" total={totalConv} values={conversions} />
-            <DataRow label="CR" total={totalCR} values={crVals} isCR />
-            <DataRow label="STP" total={totalSTP} values={stp} />
-            <DataRow label="STP CR" total={totalStpCR} values={stpCRVals} isCR />
+            <DataRow label="Clicks"     total={totalC}     values={clicks}      />
+            <DataRow label="Conversion" total={totalConv}  values={conversions} />
+            <DataRow label="CR"         total={totalCR}    values={crVals}      isCR />
+            <DataRow label="STP"        total={totalSTP}   values={stp}         />
+            <DataRow label="STP CR"     total={totalStpCR} values={stpCRVals}   isCR />
           </tbody>
         </table>
       </div>
