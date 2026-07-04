@@ -124,6 +124,7 @@ export default function Dashboard({ onLogout }) {
   const sortedDates = [...filteredDateMap.keys()].sort();
 
   const exportDates = [...new Set(rawData.map(c => c.date).filter(Boolean))].sort();
+  const showCutDropdown = Boolean(serverToday && startDate === serverToday && endDate === serverToday);
 
   function handleCutChange(campaign, newValue, oldValue, selectEl) {
     setCutModal({ campaign, newValue, oldValue, selectEl });
@@ -228,6 +229,7 @@ export default function Dashboard({ onLogout }) {
               key={`${date}__${campaign.dspName}__${campaign.campaignId}__${i}`}
               campaign={campaign}
               onCutChange={handleCutChange}
+              showCutDropdown={showCutDropdown}
             />
           ))}
         </div>

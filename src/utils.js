@@ -1,5 +1,5 @@
 export const API_URL = 'https://postback.v1mobi.com/postbacks/hourlyReport';
-export const UPDATE_CUT_API = 'https://postback.v1mobi.com/postbacks/updateCut';
+export const OPTIMIZE_CUT_API = 'https://postback.v1mobi.com/optimize';
 export const PROBE_START = '2024-01-01';
 export const PROBE_END = '2027-12-31';
 
@@ -149,13 +149,36 @@ export function exportDateWiseCSV(rawData, selectedDates) {
   if (count > 1) alert(`Exported ${count} CSV files.`);
 }
 
+function resolveCutId(campaignId, links) {
+  if (links && links.includes('id=')) {
+    const match = links.match(/[?&]id=(\d+)/);
+    if (match) return match[1];
+  }
+  return campaignId;
+}
+
 export async function updateCutValue(campaignId, links, cutValue) {
-  const res = await fetch(UPDATE_CUT_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ campaignId, links, cut: parseInt(cutValue, 10) }),
+  const id = resolveCutId(campaignId, links);
+  const url = `${OPTIMIZE_CUT_API}?id=${encodeURIComponent(id)}&cut=${encodeURIComponent(cutValue)}`;
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
     mode: 'cors',
   });
-  if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
-  return res.json();
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`API Error: ${res.status} ${res.statusText}. ${errorText}`);
+  }
+
+  const responseText = await res.text();
+  if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+    try {
+      return JSON.parse(responseText);
+    } catch {
+      return { success: true, message: responseText || 'CUT updated successfully' };
+    }
+  }
+  return { success: true, message: responseText || 'CUT updated successfully' };
 }

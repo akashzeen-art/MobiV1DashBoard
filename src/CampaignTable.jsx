@@ -25,7 +25,7 @@ function DataRow({ label, total, values, isCR }) {
   );
 }
 
-export default function CampaignTable({ campaign, onCutChange }) {
+export default function CampaignTable({ campaign, onCutChange, showCutDropdown = false }) {
   const selectRef = useRef(null);
   const { clicks, conversions, stp } = parseHourlyData(campaign.hourlyData);
 
@@ -66,18 +66,20 @@ export default function CampaignTable({ campaign, onCutChange }) {
             ? <a href={campaign.links} target="_blank" rel="noreferrer" className="clickable-link">{campaign.links}</a>
             : <span>{campaign.links}</span>}
         </div>
-        <div className="metadata-item">
-          <strong>CUT:</strong>
-          <select
-            ref={selectRef}
-            className="cut-dropdown"
-            defaultValue={cutVal}
-            data-current-value={cutVal}
-            onChange={handleCutChange}
-          >
-            {[0, 10, 20, 30].map(v => <option key={v} value={String(v)}>{v}</option>)}
-          </select>
-        </div>
+        {showCutDropdown && (
+          <div className="metadata-item">
+            <strong>CUT:</strong>
+            <select
+              ref={selectRef}
+              className="cut-dropdown"
+              defaultValue={cutVal}
+              data-current-value={cutVal}
+              onChange={handleCutChange}
+            >
+              {[0, 10, 20, 30].map(v => <option key={v} value={String(v)}>{v}</option>)}
+            </select>
+          </div>
+        )}
         <div className="metadata-item">
           <strong>Pub Link:</strong>
           <a href={pubLink} target="_blank" rel="noreferrer" className="clickable-link">{pubLink}</a>
