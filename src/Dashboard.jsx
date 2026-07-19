@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import CampaignTable from './CampaignTable';
 import DateExportModal from './DateExportModal';
+import MonthExportModal from './MonthExportModal';
 import CutConfirmModal from './CutConfirmModal';
 import {
   API_URL, PROBE_START, PROBE_END,
   formatDate, formatDateDisplay,
-  groupDataByDate, exportAllCSV, exportDateWiseCSV, updateCutValue,
+  groupDataByDate, exportAllCSV, exportDateWiseCSV, exportMonthCSV, updateCutValue,
 } from './utils';
 
 async function apiFetch(start, end) {
@@ -37,6 +38,9 @@ export default function Dashboard({ onLogout }) {
   const [rawData, setRawData]   = useState([]);
   const [selectedDSP, setSelectedDSP] = useState('all');
   const [showDateModal, setShowDateModal] = useState(false);
+  const [showMonthModal, setShowMonthModal] = useState(false);
+  const [allMonths, setAllMonths] = useState([]);
+  const [exporting, setExporting] = useState(false);
   const [cutModal, setCutModal] = useState(null);
   const [debugOutput, setDebugOutput] = useState('');
 
@@ -73,6 +77,7 @@ export default function Dashboard({ onLogout }) {
         setServerToday(latest);
         setStartDate(latest);
         setEndDate(latest);
+        setAllMonths([...new Set(dates.map(d => d.slice(0, 7)))].sort());
 
         const arr = await apiFetch(latest, latest);
         setRawData(arr);
@@ -148,6 +153,33 @@ export default function Dashboard({ onLogout }) {
     setCutModal(null);
   }
 
+  // Fetch each selected month's full data from the API and export one CSV per month
+  async function handleMonthExport(months) {
+    setShowMonthModal(false);
+    setExporting(true);
+    let exported = 0;
+    const failed = [];
+    for (const month of months) {
+      try {
+        const [y, m] = month.split('-').map(Number);
+        const monthStart = `${month}-01`;
+        const monthEnd = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+        const arr = await apiFetch(monthStart, monthEnd);
+        if (arr.length === 0) { failed.push(`${month} (no data)`); continue; }
+        exportMonthCSV(arr, month);
+        exported++;
+      } catch (e) {
+        failed.push(`${month} (${e.message})`);
+      }
+    }
+    setExporting(false);
+    if (failed.length > 0) {
+      alert(`Exported ${exported} month CSV file(s).\nSkipped: ${failed.join(', ')}`);
+    } else if (exported > 1) {
+      alert(`Exported ${exported} month CSV files.`);
+    }
+  }
+
   return (
     <div className="dashboard-container">
       <header className="dashboard-header">
@@ -201,6 +233,10 @@ export default function Dashboard({ onLogout }) {
             <div className="export-buttons">
               <button className="export-btn" onClick={() => exportAllCSV(allCampaigns)}>📥 Export All CSV</button>
               <button className="export-btn" onClick={() => setShowDateModal(true)}>📅 Export Date-Wise CSV</button>
+              <button className="export-btn" disabled={exporting}
+                onClick={() => setShowMonthModal(true)}>
+                {exporting ? '⏳ Exporting...' : '🗓️ Export Month-Wise CSV'}
+              </button>
             </div>
           </div>
         )}
@@ -249,6 +285,14 @@ export default function Dashboard({ onLogout }) {
           dates={exportDates}
           onConfirm={dates => { setShowDateModal(false); exportDateWiseCSV(rawData, dates); }}
           onClose={() => setShowDateModal(false)}
+        />
+      )}
+
+      {showMonthModal && (
+        <MonthExportModal
+          months={allMonths}
+          onConfirm={handleMonthExport}
+          onClose={() => setShowMonthModal(false)}
         />
       )}
 

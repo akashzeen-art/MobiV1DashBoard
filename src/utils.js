@@ -86,7 +86,9 @@ function hourHeaders() {
   ).join(',');
 }
 
-function buildCSVRows(campaign) {
+// One nicely-spaced block per campaign:
+// info rows → metric table header → 5 metric rows → blank gap row
+function buildCampaignBlock(campaign) {
   const { clicks, conversions, stp } = parseHourlyData(campaign.hourlyData);
   const totalC    = clicks.reduce((a, b) => a + b, 0);
   const totalConv = conversions.reduce((a, b) => a + b, 0);
@@ -94,21 +96,38 @@ function buildCSVRows(campaign) {
   const totalCR     = totalC > 0 ? ((totalConv / totalC) * 100).toFixed(2) : '0.00';
   const totalStpCR  = totalC > 0 ? ((totalSTP  / totalC) * 100).toFixed(2) : '0.00';
 
-  const d  = escapeCSV(campaign.dspName);
-  const id = escapeCSV(campaign.campaignId);
-  const l  = escapeCSV(campaign.links);
-  const row = (label, total, vals) => `${d},${id},${l},${label},${total},${vals.join(',')}\n`;
-
   const crVals    = clicks.map((c, i) => c > 0 ? ((conversions[i] / c) * 100).toFixed(2) + '%' : '0.00%');
   const stpCRVals = clicks.map((c, i) => c > 0 ? ((stp[i]         / c) * 100).toFixed(2) + '%' : '0.00%');
 
-  return (
-    row('Clicks',     totalC,    clicks)      +
-    row('Conversion', totalConv, conversions) +
-    row('CR',         totalCR  + '%', crVals)    +
-    row('STP',        totalSTP,  stp)         +
-    row('STP CR',     totalStpCR + '%', stpCRVals)
-  );
+  const row = (label, total, vals) => `${label},${total},${vals.join(',')}\n`;
+
+  let block = '';
+  block += `DSP Name:,${escapeCSV(campaign.dspName)},,Campaign ID:,${escapeCSV(campaign.campaignId)}`;
+  if (campaign.productname && campaign.productname !== '-') {
+    block += `,,Product:,${escapeCSV(campaign.productname)}`;
+  }
+  block += '\n';
+  block += `Links:,${escapeCSV(campaign.links)}\n`;
+  block += `Metric,Total,${hourHeaders()}\n`;
+  block += row('Clicks',     totalC,    clicks);
+  block += row('Conversion', totalConv, conversions);
+  block += row('CR',         totalCR  + '%', crVals);
+  block += row('STP',        totalSTP,  stp);
+  block += row('STP CR',     totalStpCR + '%', stpCRVals);
+  block += '\n';
+  return block;
+}
+
+function sectionBanner(title) {
+  return `\n${'='.repeat(60)}\n${escapeCSV(title)}\n${'='.repeat(60)}\n\n`;
+}
+
+function reportHeader(reportTitle, metaRows = []) {
+  let head = `V1 MOBI DASHBOARD,${escapeCSV(reportTitle)}\n`;
+  head += `Generated:,${new Date().toLocaleString('en-US')}\n`;
+  metaRows.forEach(([label, value]) => { head += `${label},${escapeCSV(value)}\n`; });
+  head += '\n';
+  return head;
 }
 
 function downloadCSV(content, filename) {
@@ -123,8 +142,27 @@ function downloadCSV(content, filename) {
 }
 
 export function exportAllCSV(campaigns) {
-  let csv = `DSP Name,Campaign ID,Links,Metric,Total,${hourHeaders()}\n`;
-  campaigns.forEach(c => { csv += buildCSVRows(c); });
+  const dates = [...new Set(campaigns.map(c => c.date).filter(Boolean))].sort();
+  const range = dates.length > 1 ? `${dates[0]} to ${dates[dates.length - 1]}` : (dates[0] || '-');
+
+  let csv = reportHeader('All Data Report', [
+    ['Date Range:', range],
+    ['Total Campaigns:', campaigns.length],
+  ]);
+
+  // Group campaign blocks under their date so days are clearly separated
+  dates.forEach(date => {
+    csv += sectionBanner(`DATE: ${formatDateDisplay(date)}`);
+    campaigns.filter(c => c.date === date).forEach(c => { csv += buildCampaignBlock(c); });
+  });
+
+  // Campaigns without a date (fallback)
+  const undated = campaigns.filter(c => !c.date);
+  if (undated.length > 0) {
+    csv += sectionBanner('DATE: Unknown');
+    undated.forEach(c => { csv += buildCampaignBlock(c); });
+  }
+
   downloadCSV(csv, `dashboard_${formatDate(new Date())}.csv`);
 }
 
@@ -140,13 +178,69 @@ export function exportDateWiseCSV(rawData, selectedDates) {
   dateMap.forEach((campaigns, date) => {
     if (selectedDates && !selectedDates.includes(date)) return;
     const grouped = groupDataByDate(campaigns);
-    let csv = `Date: ${date}\nDSP Name,Campaign ID,Links,Metric,Total,${hourHeaders()}\n`;
-    grouped.forEach(group => group.forEach(c => { csv += buildCSVRows(c); }));
+
+    let totalCampaigns = 0;
+    grouped.forEach(group => { totalCampaigns += group.size; });
+
+    let csv = reportHeader('Date-Wise Report', [
+      ['Date:', formatDateDisplay(date)],
+      ['Total Campaigns:', totalCampaigns],
+    ]);
+    grouped.forEach(group => group.forEach(c => { csv += buildCampaignBlock(c); }));
     downloadCSV(csv, `dashboard_${date}.csv`);
     count++;
   });
 
   if (count > 1) alert(`Exported ${count} CSV files.`);
+}
+
+export function formatMonthDisplay(month) {
+  // month = "2026-07" → "July 2026"
+  try {
+    return new Date(month + '-01T00:00:00').toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long',
+    });
+  } catch { return month; }
+}
+
+// One CSV per month: month summary (all days combined) + per-date breakdown
+export function exportMonthCSV(rawData, month) {
+  const grouped = groupDataByDate(rawData);
+  const sortedDates = [...grouped.keys()].sort();
+
+  // Month summary — same campaign merged across all days of the month
+  const summary = new Map();
+  rawData.forEach(campaign => {
+    const key = `${campaign.dspName}__${campaign.campaignId}__${campaign.links}`;
+    if (!summary.has(key)) {
+      summary.set(key, {
+        dspName:     campaign.dspName || '-',
+        campaignId:  String(campaign.campaignId || '-'),
+        links:       campaign.links || '-',
+        productname: campaign.productname || '-',
+        hourlyData:  [],
+      });
+    }
+    if (Array.isArray(campaign.hourlyData)) {
+      summary.get(key).hourlyData.push(...campaign.hourlyData);
+    }
+  });
+
+  let csv = reportHeader('Month-Wise Report', [
+    ['Month:', formatMonthDisplay(month)],
+    ['Days With Data:', sortedDates.length],
+    ['Total Campaigns:', summary.size],
+  ]);
+
+  csv += sectionBanner('MONTH SUMMARY (All Days Combined)');
+  summary.forEach(c => { csv += buildCampaignBlock(c); });
+
+  sortedDates.forEach(date => {
+    csv += sectionBanner(`DATE: ${formatDateDisplay(date)}`);
+    grouped.get(date).forEach(c => { csv += buildCampaignBlock(c); });
+  });
+
+  downloadCSV(csv, `dashboard_month_${month}.csv`);
 }
 
 function resolveCutId(campaignId, links) {
