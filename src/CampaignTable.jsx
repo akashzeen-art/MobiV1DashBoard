@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { parseHourlyData } from './utils';
+import { parseHourlyData, formatDspDisplay } from './utils';
 
 const HOURS = Array.from({ length: 24 }, (_, i) =>
   `${String(i).padStart(2, '0')}:00-${String(i + 1).padStart(2, '0')}:00`
@@ -52,7 +52,7 @@ export default function CampaignTable({ campaign, onCutChange, showCutDropdown =
     <div className="campaign-block">
       <div className="metadata-section">
         <div className="metadata-item">
-          <strong>DSP Name:</strong><span>{campaign.dspName}</span>
+          <strong>DSP Name:</strong><span>{formatDspDisplay(campaign.dspName)}</span>
         </div>
         <div className="metadata-item">
           <strong>Campaign ID:</strong><span>{campaign.campaignId}</span>

@@ -5,7 +5,7 @@ import MonthExportModal from './MonthExportModal';
 import CutConfirmModal from './CutConfirmModal';
 import {
   API_URL, PROBE_START, PROBE_END,
-  formatDate, formatDateDisplay,
+  formatDate, formatDateDisplay, formatDspDisplay,
   groupDataByDate, exportAllCSV, exportDateWiseCSV, exportMonthCSV, updateCutValue,
 } from './utils';
 
@@ -27,7 +27,7 @@ function offsetDate(base, days) {
   return formatDate(d);
 }
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout, onNavigate }) {
   const [serverToday, setServerToday] = useState('');
   const [startDate, setStartDate]     = useState('');
   const [endDate, setEndDate]         = useState('');
@@ -183,7 +183,13 @@ export default function Dashboard({ onLogout }) {
   return (
     <div className="dashboard-container">
       <header className="dashboard-header">
-        <h1>📊 V1 Mobi Dashboard</h1>
+        <div className="header-left">
+          <h1>📊 V1 Mobi Dashboard</h1>
+          <nav className="app-nav">
+            <button className="nav-btn active">Reports</button>
+            <button className="nav-btn" onClick={() => onNavigate?.('services')}>Services</button>
+          </nav>
+        </div>
         <button className="logout-button" onClick={onLogout}>Logout</button>
       </header>
 
@@ -220,7 +226,7 @@ export default function Dashboard({ onLogout }) {
               {uniqueDSPs.map(dsp => (
                 <button key={dsp}
                   className={`dsp-filter-btn${selectedDSP === dsp ? ' active' : ''}`}
-                  onClick={() => setSelectedDSP(dsp)}>{dsp}
+                  onClick={() => setSelectedDSP(dsp)}>{formatDspDisplay(dsp)}
                 </button>
               ))}
             </div>

@@ -1,7 +1,39 @@
 export const API_URL = 'https://postback.v1mobi.com/postbacks/hourlyReport';
 export const OPTIMIZE_CUT_API = 'https://postback.v1mobi.com/optimize';
+export const SERVICES_API = 'https://postback.v1mobi.com/v2/getallService';
+export const UPDATE_SERVICE_API = 'https://postback.v1mobi.com/v2/updateService';
+export const UPDATE_TRAFFIC_API = 'https://postback.v1mobi.com/v2/updateTrafficConfig';
 export const PROBE_START = '2024-01-01';
 export const PROBE_END = '2027-12-31';
+
+// Publisher full name → DSP letter code
+export const PUBLISHER_CODES = {
+  olimib: 'A',
+  afflink: 'B',
+  mobibox: 'C',
+  bladslive: 'D',
+};
+
+// DSP letter code → publisher full name
+export const CODE_TO_PUBLISHER = {
+  A: 'Olimib',
+  B: 'Afflink',
+  C: 'Mobibox',
+  D: 'BladsLive',
+};
+
+/** "Olimib" → "A"; unknown publishers stay as-is */
+export function formatPublisherDisplay(publisher) {
+  if (!publisher || publisher === '-') return publisher || '-';
+  const code = PUBLISHER_CODES[String(publisher).trim().toLowerCase()];
+  return code || publisher;
+}
+
+/** "A" → "A"; known codes stay as code only; unknown stay as-is */
+export function formatDspDisplay(dsp) {
+  if (!dsp || dsp === '-') return dsp || '-';
+  return String(dsp).trim();
+}
 
 export function formatDate(date) {
   const y = date.getFullYear();
@@ -102,7 +134,7 @@ function buildCampaignBlock(campaign) {
   const row = (label, total, vals) => `${label},${total},${vals.join(',')}\n`;
 
   let block = '';
-  block += `DSP Name:,${escapeCSV(campaign.dspName)},,Campaign ID:,${escapeCSV(campaign.campaignId)}`;
+  block += `DSP Name:,${escapeCSV(formatDspDisplay(campaign.dspName))},,Campaign ID:,${escapeCSV(campaign.campaignId)}`;
   if (campaign.productname && campaign.productname !== '-') {
     block += `,,Product:,${escapeCSV(campaign.productname)}`;
   }
@@ -275,4 +307,119 @@ export async function updateCutValue(campaignId, links, cutValue) {
     }
   }
   return { success: true, message: responseText || 'CUT updated successfully' };
+}
+
+// traffic_config comes as JSON string, empty string, or null
+// e.g. "{\"80\":50,\"19\":30,\"91\":20}" → [{ id: "80", percent: 50 }, ...]
+export function parseTrafficConfig(raw) {
+  if (raw == null || raw === '') return [];
+  try {
+    const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
+    return Object.entries(obj)
+      .map(([id, percent]) => ({ id: String(id), percent: Number(percent) || 0 }))
+      .filter(e => e.percent > 0)
+      .sort((a, b) => b.percent - a.percent);
+  } catch {
+    return [];
+  }
+}
+
+/** Build API string: {"80":50,"19":30,"91":20} — ids as keys, percents as numbers */
+export function buildTrafficConfigString(rows) {
+  const obj = {};
+  (rows || []).forEach(({ id, percent }) => {
+    const pid = String(id ?? '').trim();
+    const pct = Number(percent);
+    if (!pid || !Number.isFinite(pct) || pct <= 0) return;
+    obj[pid] = Math.round(pct);
+  });
+  return JSON.stringify(obj);
+}
+
+export async function updateTrafficConfig(serviceId, trafficConfigString) {
+  const res = await fetch(UPDATE_TRAFFIC_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      id: Number(serviceId),
+      traffic_config: trafficConfigString,
+    }),
+    mode: 'cors',
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`API Error: ${res.status} ${res.statusText}. ${errorText}`);
+  }
+
+  const responseText = await res.text();
+  if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+    try {
+      return JSON.parse(responseText);
+    } catch {
+      return { success: true, message: responseText || 'Traffic config updated' };
+    }
+  }
+  return { success: true, message: responseText || 'Traffic config updated' };
+}
+
+/** Send full service row to backend (cut + targeturl + traffic_config + other fields) */
+export async function updateService(service) {
+  const body = {
+    id: Number(service.id),
+    servicename: service.servicename || '',
+    serviceurl: service.serviceurl || '',
+    targeturl: service.targeturl || '',
+    publisher: service.publisher || '',
+    optimization: Number(service.optimization ?? 0),
+    type: service.type || '',
+    traffic_config: service.traffic_config == null || service.traffic_config === ''
+      ? ''
+      : String(service.traffic_config),
+  };
+
+  const res = await fetch(UPDATE_SERVICE_API, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+    mode: 'cors',
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`API Error: ${res.status} ${res.statusText}. ${errorText}`);
+  }
+
+  const responseText = await res.text();
+  if (responseText.trim().startsWith('{') || responseText.trim().startsWith('[')) {
+    try {
+      return JSON.parse(responseText);
+    } catch {
+      return { success: true, message: responseText || 'Service updated' };
+    }
+  }
+  return { success: true, message: responseText || 'Service updated', body };
+}
+
+export async function fetchServices() {
+  const res = await fetch(SERVICES_API, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    mode: 'cors',
+  });
+  if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  const list = Array.isArray(data) ? data : (data ? [data] : []);
+  return list.map(s => ({
+    id: Number(s.id),
+    servicename: s.servicename || '-',
+    serviceurl: s.serviceurl || '',
+    targeturl: s.targeturl || '',
+    publisher: s.publisher || '-',
+    optimization: Number(s.optimization ?? 0),
+    type: s.type || '-',
+    traffic_config: s.traffic_config ?? null,
+    trafficRoutes: parseTrafficConfig(s.traffic_config),
+  }));
 }
