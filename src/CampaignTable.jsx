@@ -1,9 +1,11 @@
-import { useRef } from 'react';
+import { memo, useRef } from 'react';
 import { parseHourlyData, formatDspDisplay } from './utils';
 
 const HOURS = Array.from({ length: 24 }, (_, i) =>
   `${String(i).padStart(2, '0')}:00-${String(i + 1).padStart(2, '0')}:00`
 );
+
+const CUT_OPTIONS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
 function calcCR(conv, clicks) {
   return clicks > 0 ? ((conv / clicks) * 100).toFixed(2) : '0.00';
@@ -25,7 +27,7 @@ function DataRow({ label, total, values, isCR }) {
   );
 }
 
-export default function CampaignTable({ campaign, onCutChange, showCutDropdown = false }) {
+function CampaignTable({ campaign, onCutChange, showCutDropdown = false }) {
   const selectRef = useRef(null);
   const { clicks, conversions, stp } = parseHourlyData(campaign.hourlyData);
 
@@ -37,7 +39,6 @@ export default function CampaignTable({ campaign, onCutChange, showCutDropdown =
   const crVals      = clicks.map((c, i) => calcCR(conversions[i], c));
   const stpCRVals   = clicks.map((c, i) => calcCR(stp[i], c));
 
-  // cut comes from API as string e.g. "0", "10"
   const cutVal = String(campaign.cut ?? '0');
 
   function handleCutChange(e) {
@@ -76,7 +77,9 @@ export default function CampaignTable({ campaign, onCutChange, showCutDropdown =
               data-current-value={cutVal}
               onChange={handleCutChange}
             >
-              {[0, 10, 20, 30].map(v => <option key={v} value={String(v)}>{v}</option>)}
+              {CUT_OPTIONS.map(v => (
+                <option key={v} value={String(v)}>{v}</option>
+              ))}
             </select>
           </div>
         )}
@@ -107,3 +110,5 @@ export default function CampaignTable({ campaign, onCutChange, showCutDropdown =
     </div>
   );
 }
+
+export default memo(CampaignTable);

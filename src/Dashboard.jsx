@@ -1,25 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo, startTransition } from 'react';
 import CampaignTable from './CampaignTable';
 import DateExportModal from './DateExportModal';
 import MonthExportModal from './MonthExportModal';
 import CutConfirmModal from './CutConfirmModal';
 import {
-  API_URL, PROBE_START, PROBE_END,
   formatDate, formatDateDisplay, formatDspDisplay,
   groupDataByDate, exportAllCSV, exportDateWiseCSV, exportMonthCSV, updateCutValue,
+  listRecentMonths,
+  fetchHourlyReport,
+  readReportsCache,
+  writeReportsCache,
+  consumeReportsPrefetch,
+  prefetchReportsToday,
+  fetchLatestDayReport,
 } from './utils';
-
-async function apiFetch(start, end) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ startDate: start, endDate: end }),
-    mode: 'cors',
-  });
-  if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
-  const data = await res.json();
-  return Array.isArray(data) ? data : (data ? [data] : []);
-}
 
 function offsetDate(base, days) {
   const d = new Date(base + 'T00:00:00');
@@ -27,74 +21,216 @@ function offsetDate(base, days) {
   return formatDate(d);
 }
 
+function debugSummary(start, end, arr, extra = '') {
+  const dsps = [...new Set(arr.map(c => c.dspName).filter(Boolean))].join(', ');
+  return `${extra}Range: ${start} → ${end}\nTotal records: ${arr.length}\nDSPs: ${dsps || '(none)'}`;
+}
+
+const BATCH = 6;
+
+const DateSection = memo(function DateSection({ date, campaigns, onCutChange, showCutDropdown, limit }) {
+  const shown = limit == null ? campaigns : campaigns.slice(0, limit);
+  return (
+    <div className="date-section">
+      <div className="date-header">
+        <h2>📅 {formatDateDisplay(date)}</h2>
+      </div>
+      {shown.map((campaign, i) => (
+        <CampaignTable
+          key={`${date}__${campaign.dspName}__${campaign.campaignId}__${i}`}
+          campaign={campaign}
+          onCutChange={onCutChange}
+          showCutDropdown={showCutDropdown}
+        />
+      ))}
+    </div>
+  );
+});
+
+function hydrateFromCache() {
+  const cached = readReportsCache();
+  if (!cached) {
+    return {
+      serverToday: '',
+      startDate: '',
+      endDate: '',
+      rawData: [],
+      dateMap: new Map(),
+      hasCache: false,
+    };
+  }
+  return {
+    serverToday: cached.serverToday,
+    startDate: cached.serverToday,
+    endDate: cached.serverToday,
+    rawData: cached.rawData,
+    dateMap: groupDataByDate(cached.rawData),
+    hasCache: cached.rawData.length > 0,
+  };
+}
+
 export default function Dashboard({ onLogout, onNavigate }) {
-  const [serverToday, setServerToday] = useState('');
-  const [startDate, setStartDate]     = useState('');
-  const [endDate, setEndDate]         = useState('');
+  const initial = useMemo(() => hydrateFromCache(), []);
+
+  const [serverToday, setServerToday] = useState(initial.serverToday);
+  const [startDate, setStartDate]     = useState(initial.startDate);
+  const [endDate, setEndDate]         = useState(initial.endDate);
   const [activeFilter, setActiveFilter] = useState('today');
-  const [loading, setLoading]   = useState(true);
+  const [loading, setLoading]   = useState(!initial.hasCache);
+  const [refreshing, setRefreshing] = useState(initial.hasCache);
   const [error, setError]       = useState('');
-  const [dateMap, setDateMap]   = useState(new Map());
-  const [rawData, setRawData]   = useState([]);
+  const [dateMap, setDateMap]   = useState(initial.dateMap);
+  const [rawData, setRawData]   = useState(initial.rawData);
   const [selectedDSP, setSelectedDSP] = useState('all');
   const [showDateModal, setShowDateModal] = useState(false);
   const [showMonthModal, setShowMonthModal] = useState(false);
-  const [allMonths, setAllMonths] = useState([]);
+  const [allMonths] = useState(() => listRecentMonths());
   const [exporting, setExporting] = useState(false);
   const [cutModal, setCutModal] = useState(null);
-  const [debugOutput, setDebugOutput] = useState('');
+  const [debugOutput, setDebugOutput] = useState(
+    initial.hasCache
+      ? debugSummary(initial.serverToday, initial.serverToday, initial.rawData, 'Cached snapshot\n')
+      : ''
+  );
+  const [rawDebugJson, setRawDebugJson] = useState('');
+  const [paintCount, setPaintCount] = useState(BATCH);
 
-  async function fetchData(start, end) {
-    if (!start || !end) return;
-    setLoading(true);
-    setError('');
-    try {
-      const arr = await apiFetch(start, end);
-      setRawData(arr);
-      setDateMap(groupDataByDate(arr));
+  function applyDayResult(latest, dayData, note = '') {
+    startTransition(() => {
+      setServerToday(latest);
+      setStartDate(latest);
+      setEndDate(latest);
+      setActiveFilter('today');
+      setRawData(dayData);
+      setDateMap(groupDataByDate(dayData));
       setSelectedDSP('all');
-      setDebugOutput(
-        `Range: ${start} → ${end}\nTotal records: ${arr.length}\nDSPs: ${[...new Set(arr.map(c => c.dspName))].join(', ')}\n\n` +
-        JSON.stringify(arr, null, 2)
-      );
+      setPaintCount(BATCH);
+      setDebugOutput(debugSummary(latest, latest, dayData, note));
+      setRawDebugJson('');
+      setError('');
+    });
+    writeReportsCache({ serverToday: latest, rawData: dayData });
+  }
+
+  async function fetchData(start, end, { soft = false } = {}) {
+    if (!start || !end) return;
+    if (soft) setRefreshing(true);
+    else setLoading(true);
+    setError('');
+    setRawDebugJson('');
+    try {
+      const arr = await fetchHourlyReport(start, end);
+      startTransition(() => {
+        setRawData(arr);
+        setDateMap(groupDataByDate(arr));
+        setSelectedDSP('all');
+        setPaintCount(BATCH);
+        setDebugOutput(debugSummary(start, end, arr));
+      });
+      if (start === end && serverToday && start === serverToday) {
+        writeReportsCache({ serverToday: start, rawData: arr });
+      }
     } catch (e) {
       setError(e.message);
       setDebugOutput(`Error: ${e.message}\n\n${e.stack || ''}`);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
-  // On mount: probe full range to find the server's latest date, then load that day
+  // Instant cache paint + background revalidate (uses App prefetch when available)
   useEffect(() => {
+    let cancelled = false;
+
     async function init() {
-      setLoading(true);
+      const hasCache = initial.hasCache;
+      if (!hasCache) setLoading(true);
+      else setRefreshing(true);
+
       try {
-        const all   = await apiFetch(PROBE_START, PROBE_END);
-        const dates = all.map(c => c.date).filter(Boolean).sort();
-        const latest = dates.length > 0 ? dates[dates.length - 1] : formatDate(new Date());
-
-        setServerToday(latest);
-        setStartDate(latest);
-        setEndDate(latest);
-        setAllMonths([...new Set(dates.map(d => d.slice(0, 7)))].sort());
-
-        const arr = await apiFetch(latest, latest);
-        setRawData(arr);
-        setDateMap(groupDataByDate(arr));
-        setDebugOutput(
-          `Server today: ${latest}\nTotal records: ${arr.length}\nDSPs: ${[...new Set(arr.map(c => c.dspName))].join(', ')}\n\n` +
-          JSON.stringify(arr, null, 2)
-        );
+        const pending = consumeReportsPrefetch() || prefetchReportsToday();
+        const { latest, dayData } = await pending;
+        if (cancelled) return;
+        applyDayResult(latest, dayData, 'Live refresh\n');
       } catch (e) {
-        setError(e.message);
-        setDebugOutput(`Init error: ${e.message}`);
+        if (cancelled) return;
+        if (!hasCache) {
+          try {
+            const { latest, dayData } = await fetchLatestDayReport();
+            if (cancelled) return;
+            applyDayResult(latest, dayData, 'Live refresh\n');
+          } catch (err) {
+            if (!cancelled) {
+              setError(err.message);
+              setDebugOutput(`Init error: ${err.message}`);
+            }
+          }
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     }
+
     init();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const { uniqueDSPs, filteredDateMap, sortedDates, allCampaigns, filteredTotal } = useMemo(() => {
+    const campaigns = [];
+    dateMap.forEach(group => group.forEach(c => campaigns.push(c)));
+    const dsps = [...new Set(campaigns.map(c => c.dspName).filter(Boolean))].sort();
+
+    const filtered = new Map();
+    let filteredCount = 0;
+    dateMap.forEach((group, date) => {
+      const list = [...group.values()].filter(
+        c => selectedDSP === 'all' || c.dspName === selectedDSP
+      );
+      if (list.length > 0) {
+        filtered.set(date, list);
+        filteredCount += list.length;
+      }
+    });
+
+    return {
+      allCampaigns: campaigns,
+      uniqueDSPs: dsps,
+      filteredDateMap: filtered,
+      sortedDates: [...filtered.keys()].sort(),
+      filteredTotal: filteredCount,
+    };
+  }, [dateMap, selectedDSP]);
+
+  useEffect(() => {
+    setPaintCount(BATCH);
+  }, [selectedDSP]);
+
+  // Progressive campaign paint — keeps first paint smooth
+  useEffect(() => {
+    if (paintCount >= filteredTotal) return undefined;
+    const id = requestAnimationFrame(() => {
+      setPaintCount(c => Math.min(c + BATCH, filteredTotal));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [paintCount, filteredTotal]);
+
+  // How many campaign cards to show across dates (progressive)
+  const dateLimits = useMemo(() => {
+    const limits = new Map();
+    let remaining = paintCount;
+    for (const date of sortedDates) {
+      const list = filteredDateMap.get(date) || [];
+      const take = Math.min(list.length, remaining);
+      limits.set(date, take);
+      remaining -= take;
+    }
+    return limits;
+  }, [sortedDates, filteredDateMap, paintCount]);
 
   function applyQuickFilter(filter) {
     if (!serverToday) return;
@@ -114,26 +250,15 @@ export default function Dashboard({ onLogout, onNavigate }) {
     fetchData(startDate, endDate);
   }
 
-  // Derive display data
-  const allCampaigns = [];
-  dateMap.forEach(group => group.forEach(c => allCampaigns.push(c)));
-  const uniqueDSPs = [...new Set(allCampaigns.map(c => c.dspName).filter(Boolean))].sort();
-
-  const filteredDateMap = new Map();
-  dateMap.forEach((group, date) => {
-    const filtered = [...group.values()].filter(
-      c => selectedDSP === 'all' || c.dspName === selectedDSP
-    );
-    if (filtered.length > 0) filteredDateMap.set(date, filtered);
-  });
-  const sortedDates = [...filteredDateMap.keys()].sort();
-
-  const exportDates = [...new Set(rawData.map(c => c.date).filter(Boolean))].sort();
+  const exportDates = useMemo(
+    () => [...new Set(rawData.map(c => c.date).filter(Boolean))].sort(),
+    [rawData]
+  );
   const showCutDropdown = Boolean(serverToday && startDate === serverToday && endDate === serverToday);
 
-  function handleCutChange(campaign, newValue, oldValue, selectEl) {
+  const handleCutChange = useCallback((campaign, newValue, oldValue, selectEl) => {
     setCutModal({ campaign, newValue, oldValue, selectEl });
-  }
+  }, []);
 
   async function confirmCut() {
     const { campaign, newValue, selectEl } = cutModal;
@@ -153,7 +278,6 @@ export default function Dashboard({ onLogout, onNavigate }) {
     setCutModal(null);
   }
 
-  // Fetch each selected month's full data from the API and export one CSV per month
   async function handleMonthExport(months) {
     setShowMonthModal(false);
     setExporting(true);
@@ -164,7 +288,7 @@ export default function Dashboard({ onLogout, onNavigate }) {
         const [y, m] = month.split('-').map(Number);
         const monthStart = `${month}-01`;
         const monthEnd = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
-        const arr = await apiFetch(monthStart, monthEnd);
+        const arr = await fetchHourlyReport(monthStart, monthEnd);
         if (arr.length === 0) { failed.push(`${month} (no data)`); continue; }
         exportMonthCSV(arr, month);
         exported++;
@@ -179,6 +303,18 @@ export default function Dashboard({ onLogout, onNavigate }) {
       alert(`Exported ${exported} month CSV files.`);
     }
   }
+
+  function loadRawDebug() {
+    if (rawDebugJson) return;
+    try {
+      setRawDebugJson(JSON.stringify(rawData, null, 2));
+    } catch {
+      setRawDebugJson('(Could not serialize response)');
+    }
+  }
+
+  const showBlockingLoader = loading && !allCampaigns.length;
+  const paintedDates = sortedDates.filter(d => (dateLimits.get(d) || 0) > 0);
 
   return (
     <div className="dashboard-container">
@@ -205,13 +341,14 @@ export default function Dashboard({ onLogout, onNavigate }) {
             <input type="date" className="date-input" value={endDate}
               onChange={e => { setEndDate(e.target.value); setActiveFilter(null); }} />
           </div>
-          <button className="view-button" onClick={handleView}>View</button>
+          <button className="view-button" onClick={handleView} disabled={loading || refreshing}>View</button>
         </div>
 
         <div className="quick-filters">
           {[['today','Today'],['yesterday','Yesterday'],['7days','7 Days'],['1month','1 Month']].map(([f, label]) => (
             <button key={f}
               className={`quick-filter-btn${activeFilter === f ? ' active' : ''}`}
+              disabled={!serverToday || loading}
               onClick={() => applyQuickFilter(f)}>{label}
             </button>
           ))}
@@ -248,41 +385,52 @@ export default function Dashboard({ onLogout, onNavigate }) {
         )}
       </section>
 
-      {loading && (
+      {refreshing && (
+        <div className="refresh-banner" aria-live="polite">
+          <div className="spinner spinner-sm" />
+          <span>Updating latest data…</span>
+        </div>
+      )}
+
+      {showBlockingLoader && (
         <div className="loading-indicator">
           <div className="spinner" />
           <p>Loading data...</p>
         </div>
       )}
 
-      {!loading && error && <div className="error-banner">{error}</div>}
+      {!showBlockingLoader && error && !allCampaigns.length && (
+        <div className="error-banner">{error}</div>
+      )}
 
-      {!loading && !error && sortedDates.length === 0 && (
+      {!showBlockingLoader && !error && sortedDates.length === 0 && !refreshing && (
         <div className="empty-state">No data available for the selected date range.</div>
       )}
 
-      {!loading && sortedDates.map(date => (
-        <div key={date} className="date-section">
-          <div className="date-header">
-            <h2>📅 {formatDateDisplay(date)}</h2>
-          </div>
-          {filteredDateMap.get(date).map((campaign, i) => (
-            <CampaignTable
-              key={`${date}__${campaign.dspName}__${campaign.campaignId}__${i}`}
-              campaign={campaign}
-              onCutChange={handleCutChange}
-              showCutDropdown={showCutDropdown}
-            />
-          ))}
-        </div>
+      {!showBlockingLoader && paintedDates.map(date => (
+        <DateSection
+          key={date}
+          date={date}
+          campaigns={filteredDateMap.get(date)}
+          onCutChange={handleCutChange}
+          showCutDropdown={showCutDropdown}
+          limit={dateLimits.get(date)}
+        />
       ))}
 
-      <details className="debug-panel">
+      {!showBlockingLoader && paintCount < filteredTotal && (
+        <div className="refresh-banner">
+          <div className="spinner spinner-sm" />
+          <span>Showing {paintCount} of {filteredTotal} campaigns…</span>
+        </div>
+      )}
+
+      <details className="debug-panel" onToggle={e => e.currentTarget.open && loadRawDebug()}>
         <summary>🔍 Debug: View API Response</summary>
         <div style={{ padding: 16 }}>
           <button className="view-button" style={{ marginBottom: 10 }}
             onClick={() => fetchData(startDate, endDate)}>Test API Connection</button>
-          <pre className="debug-output">{debugOutput}</pre>
+          <pre className="debug-output">{debugOutput}{rawDebugJson ? `\n\n${rawDebugJson}` : '\n\n(Open panel to load raw JSON)'}</pre>
         </div>
       </details>
 

@@ -57,7 +57,13 @@ body {
 .loading-indicator { text-align: center; padding: 40px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 24px; }
 .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.spinner-sm { width: 18px; height: 18px; border-width: 2px; margin: 0; flex-shrink: 0; }
 .loading-indicator p { color: #666; font-size: 16px; }
+.refresh-banner {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 10px 16px; margin-bottom: 16px; border-radius: 8px;
+  background: #f0f2ff; color: #4c5fd5; font-size: 13px; font-weight: 600;
+}
 
 /* Error */
 .error-banner { background: #fee; color: #c33; padding: 16px; border-radius: 8px; border: 1px solid #fcc; margin-bottom: 24px; }

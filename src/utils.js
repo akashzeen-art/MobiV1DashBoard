@@ -3,8 +3,115 @@ export const OPTIMIZE_CUT_API = 'https://postback.v1mobi.com/optimize';
 export const SERVICES_API = 'https://postback.v1mobi.com/v2/getallService';
 export const UPDATE_SERVICE_API = 'https://postback.v1mobi.com/v2/updateService';
 export const UPDATE_TRAFFIC_API = 'https://postback.v1mobi.com/v2/updateTrafficConfig';
-export const PROBE_START = '2024-01-01';
-export const PROBE_END = '2027-12-31';
+
+/** How many calendar months to offer in Month-Wise export (no API probe needed) */
+export const EXPORT_MONTH_COUNT = 24;
+
+const REPORTS_CACHE_KEY = 'v1mobi_reports_today_v1';
+
+/** Last N months as YYYY-MM, newest first */
+export function listRecentMonths(count = EXPORT_MONTH_COUNT) {
+  const out = [];
+  const d = new Date();
+  d.setDate(1);
+  for (let i = 0; i < count; i++) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    out.push(`${y}-${m}`);
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+
+export async function fetchHourlyReport(start, end) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ startDate: start, endDate: end }),
+    mode: 'cors',
+  });
+  if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data ? [data] : []);
+}
+
+function offsetDateStr(base, days) {
+  const d = new Date(base + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return formatDate(d);
+}
+
+/** Load cached "today" snapshot for instant paint on refresh */
+export function readReportsCache() {
+  try {
+    const raw = sessionStorage.getItem(REPORTS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.serverToday || !Array.isArray(parsed.rawData)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeReportsCache({ serverToday, rawData }) {
+  try {
+    sessionStorage.setItem(REPORTS_CACHE_KEY, JSON.stringify({
+      serverToday,
+      rawData,
+      savedAt: Date.now(),
+    }));
+  } catch {
+    // quota / private mode — ignore
+  }
+}
+
+export function clearReportsCache() {
+  try { sessionStorage.removeItem(REPORTS_CACHE_KEY); } catch { /* ignore */ }
+}
+
+/**
+ * Fastest init path: fetch client today only; if empty, try yesterday.
+ * Returns { latest, dayData }.
+ */
+export async function fetchLatestDayReport() {
+  const today = formatDate(new Date());
+  const todayData = await fetchHourlyReport(today, today);
+  if (todayData.length > 0) {
+    return { latest: today, dayData: todayData };
+  }
+  const yesterday = offsetDateStr(today, -1);
+  const yData = await fetchHourlyReport(yesterday, yesterday);
+  if (yData.length > 0) {
+    return { latest: yesterday, dayData: yData };
+  }
+  return { latest: today, dayData: [] };
+}
+
+/** Shared in-flight prefetch so App can start the request before Dashboard mounts */
+let reportsPrefetch = null;
+
+export function prefetchReportsToday() {
+  if (!reportsPrefetch) {
+    reportsPrefetch = fetchLatestDayReport()
+      .then(result => {
+        writeReportsCache({ serverToday: result.latest, rawData: result.dayData });
+        return result;
+      })
+      .catch(err => {
+        reportsPrefetch = null;
+        throw err;
+      });
+  }
+  return reportsPrefetch;
+}
+
+export function consumeReportsPrefetch() {
+  const p = reportsPrefetch;
+  reportsPrefetch = null;
+  return p;
+}
+
 
 // Publisher full name → DSP letter code
 export const PUBLISHER_CODES = {
