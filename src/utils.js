@@ -7,7 +7,7 @@ export const UPDATE_TRAFFIC_API = 'https://postback.v1mobi.com/v2/updateTrafficC
 /** How many calendar months to offer in Month-Wise export (no API probe needed) */
 export const EXPORT_MONTH_COUNT = 24;
 
-const REPORTS_CACHE_KEY = 'v1mobi_reports_today_v1';
+const REPORTS_CACHE_KEY = 'v1mobi_reports_today_d2c_v1';
 
 /** Last N months as YYYY-MM, newest first */
 export function listRecentMonths(count = EXPORT_MONTH_COUNT) {
@@ -32,7 +32,9 @@ export async function fetchHourlyReport(start, end) {
   });
   if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
   const data = await res.json();
-  return Array.isArray(data) ? data : (data ? [data] : []);
+  const list = Array.isArray(data) ? data : (data ? [data] : []);
+  // Reports page: only D2C campaigns
+  return list.filter(item => String(item?.type ?? '').trim().toLowerCase() === 'd2c');
 }
 
 function offsetDateStr(base, days) {
