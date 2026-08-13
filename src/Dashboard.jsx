@@ -6,7 +6,7 @@ import CutConfirmModal from './CutConfirmModal';
 import {
   formatDate, formatDateDisplay, formatDspDisplay,
   groupDataByDate, exportAllCSV, exportDateWiseCSV, exportMonthCSV, updateCutValue,
-  listRecentMonths,
+  listRecentMonths, campaignCR,
   fetchHourlyReport,
   readReportsCache,
   writeReportsCache,
@@ -188,9 +188,9 @@ export default function Dashboard({ onLogout, onNavigate }) {
     const filtered = new Map();
     let filteredCount = 0;
     dateMap.forEach((group, date) => {
-      const list = [...group.values()].filter(
-        c => selectedDSP === 'all' || c.dspName === selectedDSP
-      );
+      const list = [...group.values()]
+        .filter(c => selectedDSP === 'all' || c.dspName === selectedDSP)
+        .sort((a, b) => campaignCR(b) - campaignCR(a)); // max CR → min CR
       if (list.length > 0) {
         filtered.set(date, list);
         filteredCount += list.length;

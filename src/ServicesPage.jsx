@@ -42,7 +42,6 @@ export default function ServicesPage({ onLogout, onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
   const [publisherFilter, setPublisherFilter] = useState('all');
   const [editService, setEditService] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
@@ -72,15 +71,9 @@ export default function ServicesPage({ onLogout, onNavigate }) {
     [services]
   );
 
-  const types = useMemo(
-    () => [...new Set(services.map(s => s.type).filter(Boolean))].sort(),
-    [services]
-  );
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return services.filter(s => {
-      if (typeFilter !== 'all' && s.type !== typeFilter) return false;
       if (publisherFilter !== 'all' && s.publisher !== publisherFilter) return false;
       if (!q) return true;
       return (
@@ -92,7 +85,7 @@ export default function ServicesPage({ onLogout, onNavigate }) {
         s.targeturl.toLowerCase().includes(q)
       );
     });
-  }, [services, search, typeFilter, publisherFilter]);
+  }, [services, search, publisherFilter]);
 
   async function handleSave(payload) {
     await updateService(payload);
@@ -133,13 +126,6 @@ export default function ServicesPage({ onLogout, onNavigate }) {
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
-          </div>
-          <div className="date-input-group">
-            <label>Type</label>
-            <select className="cut-dropdown" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-              <option value="all">All</option>
-              {types.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
           </div>
           <div className="date-input-group">
             <label>Publisher</label>

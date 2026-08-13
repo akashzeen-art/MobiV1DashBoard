@@ -180,6 +180,14 @@ export function parseHourlyData(hourlyData) {
   return { clicks, conversions, stp };
 }
 
+/** Overall CR % for a campaign: (conversions / clicks) × 100 */
+export function campaignCR(campaign) {
+  const { clicks, conversions } = parseHourlyData(campaign?.hourlyData);
+  const totalC = clicks.reduce((a, b) => a + b, 0);
+  const totalConv = conversions.reduce((a, b) => a + b, 0);
+  return totalC > 0 ? (totalConv / totalC) * 100 : 0;
+}
+
 // Group ALL DSP data by date → campaign
 export function groupDataByDate(data) {
   const dateMap = new Map();
@@ -520,15 +528,18 @@ export async function fetchServices() {
   if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
   const data = await res.json();
   const list = Array.isArray(data) ? data : (data ? [data] : []);
-  return list.map(s => ({
-    id: Number(s.id),
-    servicename: s.servicename || '-',
-    serviceurl: s.serviceurl || '',
-    targeturl: s.targeturl || '',
-    publisher: s.publisher || '-',
-    optimization: Number(s.optimization ?? 0),
-    type: s.type || '-',
-    traffic_config: s.traffic_config ?? null,
-    trafficRoutes: parseTrafficConfig(s.traffic_config),
-  }));
+  // Services page: only D2C
+  return list
+    .filter(s => String(s?.type ?? '').trim().toLowerCase() === 'd2c')
+    .map(s => ({
+      id: Number(s.id),
+      servicename: s.servicename || '-',
+      serviceurl: s.serviceurl || '',
+      targeturl: s.targeturl || '',
+      publisher: s.publisher || '-',
+      optimization: Number(s.optimization ?? 0),
+      type: s.type || '-',
+      traffic_config: s.traffic_config ?? null,
+      trafficRoutes: parseTrafficConfig(s.traffic_config),
+    }));
 }
