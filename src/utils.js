@@ -2,12 +2,13 @@ export const API_URL = 'https://postback.v1mobi.com/postbacks/hourlyReport';
 export const OPTIMIZE_CUT_API = 'https://postback.v1mobi.com/optimize';
 export const SERVICES_API = 'https://postback.v1mobi.com/v2/getallService';
 export const UPDATE_SERVICE_API = 'https://postback.v1mobi.com/v2/updateService';
+export const ADD_SERVICE_API = 'https://postback.v1mobi.com/v2/addService';
 export const UPDATE_TRAFFIC_API = 'https://postback.v1mobi.com/v2/updateTrafficConfig';
 
 /** How many calendar months to offer in Month-Wise export (no API probe needed) */
 export const EXPORT_MONTH_COUNT = 24;
 
-const REPORTS_CACHE_KEY = 'v1mobi_reports_today_d2c_v1';
+const REPORTS_CACHE_KEY = 'v1mobi_reports_today_d2c_v2';
 
 /** Last N months as YYYY-MM, newest first */
 export function listRecentMonths(count = EXPORT_MONTH_COUNT) {
@@ -160,6 +161,19 @@ export function formatDateDisplay(dateString) {
   } catch { return dateString; }
 }
 
+/** packname comes as "{\"monthly\":99}" → "monthly: 99" */
+export function formatPackDisplay(pack) {
+  const v = String(pack ?? '').trim();
+  if (!v) return '';
+  try {
+    const obj = JSON.parse(v);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      return Object.entries(obj).map(([k, val]) => `${k}: ${val}`).join(', ');
+    }
+  } catch { /* show raw */ }
+  return v;
+}
+
 // API returns sparse hourlyData — only hours with activity
 // hour format: "12:00-13:00" → extract start hour index
 export function parseHourlyData(hourlyData) {
@@ -207,6 +221,11 @@ export function groupDataByDate(data) {
         campaignId:  String(campaign.campaignId || '-'),
         links:       campaign.links       || '-',
         productname: campaign.productname || '-',
+        pgname:      campaign.pgname      || '',
+        entity:      campaign.entity      || '',
+        packname:    campaign.packname || campaign.pack || '',
+        publisher:   campaign.publisher   || '',
+        type:        campaign.type        || '',
         date,
         cut:         String(campaign.cut ?? '0'),
         hourlyData:  [],
@@ -256,6 +275,10 @@ function buildCampaignBlock(campaign) {
     block += `,,Product:,${escapeCSV(campaign.productname)}`;
   }
   block += '\n';
+  if (campaign.pgname) block += `PG Name:,${escapeCSV(campaign.pgname)}`;
+  if (campaign.entity) block += `${campaign.pgname ? ',,' : ''}Entity:,${escapeCSV(campaign.entity)}`;
+  if (campaign.pgname || campaign.entity) block += '\n';
+  if (campaign.packname) block += `Pack:,${escapeCSV(formatPackDisplay(campaign.packname))}\n`;
   block += `Links:,${escapeCSV(campaign.links)}\n`;
   block += `Metric,Total,${hourHeaders()}\n`;
   block += row('Clicks',     totalC,    clicks);
@@ -367,6 +390,10 @@ export function exportMonthCSV(rawData, month) {
         campaignId:  String(campaign.campaignId || '-'),
         links:       campaign.links || '-',
         productname: campaign.productname || '-',
+        pgname:      campaign.pgname || '',
+        entity:      campaign.entity || '',
+        packname:    campaign.packname || campaign.pack || '',
+        publisher:   campaign.publisher || '',
         hourlyData:  [],
       });
     }
@@ -481,23 +508,77 @@ export async function updateTrafficConfig(serviceId, trafficConfigString) {
   return { success: true, message: responseText || 'Traffic config updated' };
 }
 
-/** Send full service row to backend (cut + targeturl + traffic_config + other fields) */
-export async function updateService(service) {
-  const body = {
-    id: Number(service.id),
-    servicename: service.servicename || '',
-    serviceurl: service.serviceurl || '',
-    targeturl: service.targeturl || '',
-    publisher: service.publisher || '',
-    optimization: Number(service.optimization ?? 0),
-    type: service.type || '',
-    traffic_config: service.traffic_config == null || service.traffic_config === ''
-      ? ''
-      : String(service.traffic_config),
-  };
+/** Pack is stored as a JSON string, e.g. "{\"monthly\":99}" */
+export function normalizePack(raw) {
+  const v = String(raw ?? '').trim();
+  if (!v) return '';
+  try {
+    const parsed = JSON.parse(v);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    // plain number or text → {"monthly":99}
+  }
+  if (/^\d+(\.\d+)?$/.test(v)) return JSON.stringify({ monthly: Number(v) });
+  return JSON.stringify({ monthly: v });
+}
 
-  const res = await fetch(UPDATE_SERVICE_API, {
-    method: 'PUT',
+/** traffic_config is a JSON string or null, e.g. "{\"91\":20,\"122\":80}" */
+export function normalizeTrafficConfig(raw) {
+  if (raw == null || raw === '') return null;
+  let obj = raw;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s || s === '{}') return null;
+    try { obj = JSON.parse(s); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const compact = {};
+  Object.entries(obj).forEach(([id, percent]) => {
+    const pct = Number(percent);
+    if (!id || !Number.isFinite(pct) || pct <= 0) return;
+    compact[String(id)] = Math.round(pct);
+  });
+  return Object.keys(compact).length ? JSON.stringify(compact) : null;
+}
+
+async function nextServiceId() {
+  const res = await fetch(SERVICES_API, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    mode: 'cors',
+  });
+  if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  const list = Array.isArray(data) ? data : (data ? [data] : []);
+  const ids = list.map(s => Number(s.id)).filter(n => Number.isFinite(n));
+  return (ids.length ? Math.max(...ids) : 0) + 1;
+}
+
+/**
+ * Exact /addService + /updateService body:
+ * { id, servicename, pgname, entity, pack, serviceurl, targeturl, publisher, optimization, type, traffic_config }
+ */
+export function buildServiceBody(service) {
+  return {
+    id: Number(service.id),
+    servicename: String(service.servicename || ''),
+    pgname: String(service.pgname || ''),
+    entity: String(service.entity || ''),
+    pack: normalizePack(service.pack),
+    serviceurl: String(service.serviceurl || ''),
+    targeturl: String(service.targeturl || ''),
+    publisher: !service.publisher || service.publisher === '-' ? '' : String(service.publisher),
+    optimization: Number(service.optimization ?? 0),
+    type: String(service.type || 'd2c'),
+    traffic_config: normalizeTrafficConfig(service.traffic_config),
+  };
+}
+
+async function postService(url, method, body, okMessage) {
+  const res = await fetch(url, {
+    method,
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),
     mode: 'cors',
@@ -513,11 +594,27 @@ export async function updateService(service) {
     try {
       return JSON.parse(responseText);
     } catch {
-      return { success: true, message: responseText || 'Service updated' };
+      return { success: true, message: responseText || okMessage };
     }
   }
-  return { success: true, message: responseText || 'Service updated', body };
+  return { success: true, message: responseText || okMessage, body };
 }
+
+/** Add → POST /v2/addService; Edit → PUT /v2/updateService. Same body shape. */
+export async function saveService(service) {
+  const isEdit = service.id != null && service.id !== '';
+  const body = buildServiceBody({
+    ...service,
+    id: isEdit ? service.id : await nextServiceId(),
+  });
+  if (isEdit) {
+    return postService(UPDATE_SERVICE_API, 'PUT', body, 'Service updated');
+  }
+  return postService(ADD_SERVICE_API, 'POST', body, 'Service added');
+}
+
+export const addService = saveService;
+export const updateService = saveService;
 
 export async function fetchServices() {
   const res = await fetch(SERVICES_API, {
@@ -534,6 +631,9 @@ export async function fetchServices() {
     .map(s => ({
       id: Number(s.id),
       servicename: s.servicename || '-',
+      pgname: s.pgname || '',
+      entity: s.entity || '',
+      pack: s.pack || '',
       serviceurl: s.serviceurl || '',
       targeturl: s.targeturl || '',
       publisher: s.publisher || '-',

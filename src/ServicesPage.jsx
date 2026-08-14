@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   fetchServices,
-  updateService,
+  saveService,
   formatPublisherDisplay,
-  parseTrafficConfig,
 } from './utils';
 import ServiceEditModal from './ServiceEditModal';
+import ServiceAddModal from './ServiceAddModal';
 
 function TrafficBars({ routes, nameById }) {
   if (!routes.length) return <span className="muted traffic-empty">No split</span>;
@@ -44,6 +44,7 @@ export default function ServicesPage({ onLogout, onNavigate }) {
   const [search, setSearch] = useState('');
   const [publisherFilter, setPublisherFilter] = useState('all');
   const [editService, setEditService] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
   async function load() {
@@ -79,6 +80,9 @@ export default function ServicesPage({ onLogout, onNavigate }) {
       return (
         String(s.id).includes(q) ||
         s.servicename.toLowerCase().includes(q) ||
+        (s.pgname || '').toLowerCase().includes(q) ||
+        (s.entity || '').toLowerCase().includes(q) ||
+        (s.pack || '').toLowerCase().includes(q) ||
         s.publisher.toLowerCase().includes(q) ||
         formatPublisherDisplay(s.publisher).toLowerCase().includes(q) ||
         s.serviceurl.toLowerCase().includes(q) ||
@@ -88,18 +92,17 @@ export default function ServicesPage({ onLogout, onNavigate }) {
   }, [services, search, publisherFilter]);
 
   async function handleSave(payload) {
-    await updateService(payload);
-    setServices(prev => prev.map(s =>
-      s.id === payload.id
-        ? {
-            ...s,
-            ...payload,
-            trafficRoutes: parseTrafficConfig(payload.traffic_config),
-          }
-        : s
-    ));
+    await saveService(payload);
     setEditService(null);
     setStatusMsg(`Service #${payload.id} saved.`);
+    await load();
+  }
+
+  async function handleAdd(payload) {
+    await saveService(payload);
+    setShowAdd(false);
+    setStatusMsg(`Service “${payload.servicename}” added.`);
+    await load();
   }
 
   return (
@@ -122,7 +125,7 @@ export default function ServicesPage({ onLogout, onNavigate }) {
             <input
               className="date-input"
               style={{ width: '100%' }}
-              placeholder="ID, name, publisher, URL…"
+              placeholder="ID, name, PG, entity, pack, publisher, URL…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -136,6 +139,9 @@ export default function ServicesPage({ onLogout, onNavigate }) {
           </div>
           <button className="view-button" onClick={load} disabled={loading}>
             {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          <button className="svc-add-btn" onClick={() => { setStatusMsg(''); setShowAdd(true); }}>
+            + Add Service
           </button>
         </div>
         <p className="services-count">
@@ -164,6 +170,9 @@ export default function ServicesPage({ onLogout, onNavigate }) {
               <tr>
                 <th>ID</th>
                 <th>Service Name</th>
+                <th>PG Name</th>
+                <th>Entity</th>
+                <th>Pack</th>
                 <th>Publisher</th>
                 <th>Type</th>
                 <th>CUT</th>
@@ -178,7 +187,10 @@ export default function ServicesPage({ onLogout, onNavigate }) {
                 <tr key={s.id}>
                   <td className="svc-id">{s.id}</td>
                   <td className="svc-name">{s.servicename}</td>
-                  <td>{s.publisher ? formatPublisherDisplay(s.publisher) : '—'}</td>
+                  <td>{s.pgname || '—'}</td>
+                  <td>{s.entity || '—'}</td>
+                  <td>{s.pack || '—'}</td>
+                  <td>{s.publisher && s.publisher !== '-' ? formatPublisherDisplay(s.publisher) : '—'}</td>
                   <td>
                     <span className={`type-badge type-${s.type}`}>{s.type}</span>
                   </td>
@@ -219,6 +231,14 @@ export default function ServicesPage({ onLogout, onNavigate }) {
           allServices={services}
           onSave={handleSave}
           onClose={() => setEditService(null)}
+        />
+      )}
+
+      {showAdd && (
+        <ServiceAddModal
+          allServices={services}
+          onSave={handleAdd}
+          onClose={() => setShowAdd(false)}
         />
       )}
     </div>
