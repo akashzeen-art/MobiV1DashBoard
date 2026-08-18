@@ -3,6 +3,7 @@ import {
   CODE_TO_PUBLISHER,
   PUBLISHER_CODES,
   formatPublisherDisplay,
+  listDspOptions,
   parseTrafficConfig,
   buildTrafficConfigString,
 } from './utils';
@@ -14,6 +15,7 @@ function publisherValue(p) {
   if (!p || p === '-') return '';
   const names = Object.values(CODE_TO_PUBLISHER);
   if (names.includes(p)) return p;
+  if (CODE_TO_PUBLISHER[p]) return CODE_TO_PUBLISHER[p];
   const code = PUBLISHER_CODES[String(p).trim().toLowerCase()];
   return code ? CODE_TO_PUBLISHER[code] : p;
 }
@@ -53,6 +55,7 @@ export default function ServiceEditModal({ service, allServices, onSave, onClose
     () => [...allServices].sort((a, b) => a.id - b.id),
     [allServices]
   );
+  const dspOptions = useMemo(() => listDspOptions(allServices), [allServices]);
 
   const total = trafficRows.reduce((sum, r) => sum + (Number(r.percent) || 0), 0);
   const usedIds = new Set(trafficRows.map(r => String(r.id)).filter(Boolean));
@@ -190,11 +193,11 @@ export default function ServiceEditModal({ service, allServices, onSave, onClose
                 <input className="svc-edit-input" value={pack} placeholder='{"monthly":99}' onChange={e => setPack(e.target.value)} />
               </div>
               <div className="svc-edit-field">
-                <label>Publisher</label>
+                <label>DSP</label>
                 <select className="cut-dropdown" value={publisher} onChange={e => setPublisher(e.target.value)}>
                   <option value="">—</option>
-                  {Object.entries(CODE_TO_PUBLISHER).map(([code, name]) => (
-                    <option key={code} value={name}>{code}</option>
+                  {dspOptions.map(opt => (
+                    <option key={opt.label} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
               </div>
@@ -344,7 +347,7 @@ export default function ServiceEditModal({ service, allServices, onSave, onClose
               </p>
               <ul className="confirm-save-list">
                 <li><span>Name</span><strong>{servicename || '—'}</strong></li>
-                <li><span>Publisher</span><strong>{formatPublisherDisplay(publisher) || '—'}</strong></li>
+                <li><span>DSP</span><strong>{formatPublisherDisplay(publisher) || '—'}</strong></li>
                 <li><span>PG / Entity / Pack</span><strong>{[pgname, entity, pack].filter(Boolean).join(' · ') || '—'}</strong></li>
                 <li><span>Service URL</span><strong>{serviceurl || '—'}</strong></li>
                 <li><span>CUT</span><strong>{optimization}%</strong></li>

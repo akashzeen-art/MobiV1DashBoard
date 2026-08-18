@@ -145,6 +145,23 @@ export function formatDspDisplay(dsp) {
   return String(dsp).trim();
 }
 
+/** DSP dropdown: known A–D plus every publisher already on services */
+export function listDspOptions(services = []) {
+  const byLabel = new Map();
+  Object.entries(CODE_TO_PUBLISHER).forEach(([code, name]) => {
+    byLabel.set(code, { value: name, label: code });
+  });
+  (services || []).forEach(s => {
+    const raw = String(s?.publisher ?? '').trim();
+    if (!raw || raw === '-') return;
+    const label = formatPublisherDisplay(raw);
+    if (!byLabel.has(label)) byLabel.set(label, { value: raw, label });
+  });
+  return [...byLabel.values()].sort((a, b) =>
+    String(a.label).localeCompare(String(b.label), undefined, { numeric: true })
+  );
+}
+
 export function formatDate(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
