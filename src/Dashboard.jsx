@@ -260,21 +260,61 @@ export default function Dashboard({ onLogout, onNavigate }) {
     setCutModal({ campaign, newValue, oldValue, selectEl });
   }, []);
 
+  function applyCutToState(campId, cutStr, sourceData) {
+    const patchedRaw = (sourceData || rawData).map(c =>
+      String(c.campaignId) === campId ? { ...c, cut: cutStr } : c
+    );
+    setRawData(patchedRaw);
+    setDateMap(groupDataByDate(patchedRaw));
+    if (serverToday) {
+      writeReportsCache({
+        serverToday,
+        rawData: patchedRaw.filter(c => c.date === serverToday),
+      });
+    }
+  }
+
   async function confirmCut() {
-    const { campaign, newValue, selectEl } = cutModal;
+    const { campaign, newValue } = cutModal;
     setCutModal(null);
+    const cutStr = String(newValue);
+    const campId = String(campaign.campaignId);
     try {
-      await updateCutValue(campaign.campaignId, campaign.links, newValue);
-      if (selectEl) selectEl.setAttribute('data-current-value', newValue);
-      alert('CUT value updated successfully!');
+      // Landing-page camp id: https://postback.v1mobi.com/v2/landingPage?id={campaignId}
+      await updateCutValue(campId, cutStr);
+
+      // Immediate UI update
+      applyCutToState(campId, cutStr);
+
+      // Soft reload and keep the new CUT (report API can lag)
+      if (startDate && endDate) {
+        setRefreshing(true);
+        setError('');
+        try {
+          const arr = await fetchHourlyReport(startDate, endDate);
+          const patched = arr.map(c =>
+            String(c.campaignId) === campId ? { ...c, cut: cutStr } : c
+          );
+          startTransition(() => {
+            setRawData(patched);
+            setDateMap(groupDataByDate(patched));
+            setPaintCount(BATCH);
+            setDebugOutput(debugSummary(startDate, endDate, patched, `CUT ${campId} → ${cutStr}%\n`));
+          });
+          if (startDate === endDate && serverToday && startDate === serverToday) {
+            writeReportsCache({ serverToday: startDate, rawData: patched });
+          }
+        } finally {
+          setRefreshing(false);
+          setLoading(false);
+        }
+      }
     } catch (e) {
-      alert('Failed to update CUT value. Please try again.');
-      if (selectEl) selectEl.value = selectEl.getAttribute('data-current-value') || String(campaign.cut ?? 0);
+      alert(`Failed to update CUT: ${e.message || 'Please try again.'}`);
     }
   }
 
   function cancelCut() {
-    if (cutModal?.selectEl) cutModal.selectEl.value = cutModal.oldValue;
     setCutModal(null);
   }
 

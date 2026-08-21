@@ -43,8 +43,7 @@ function CampaignTable({ campaign, onCutChange, showCutDropdown = false }) {
 
   function handleCutChange(e) {
     const newValue = e.target.value;
-    const oldValue = selectRef.current.getAttribute('data-current-value') || cutVal;
-    onCutChange(campaign, newValue, oldValue, selectRef.current);
+    onCutChange(campaign, newValue, cutVal, selectRef.current);
   }
 
   const pubLink = `https://postback.v1mobi.com/v2/landingPage?id=${campaign.campaignId}&click=clickid`;
@@ -69,7 +68,7 @@ function CampaignTable({ campaign, onCutChange, showCutDropdown = false }) {
                   <select
                     ref={selectRef}
                     className="cut-dropdown"
-                    defaultValue={cutVal}
+                    value={cutVal}
                     data-current-value={cutVal}
                     onChange={handleCutChange}
                   >

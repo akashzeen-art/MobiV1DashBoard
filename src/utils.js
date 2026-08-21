@@ -436,16 +436,12 @@ export function exportMonthCSV(rawData, month) {
   downloadCSV(csv, `dashboard_month_${month}.csv`);
 }
 
-function resolveCutId(campaignId, links) {
-  if (links && links.includes('id=')) {
-    const match = links.match(/[?&]id=(\d+)/);
-    if (match) return match[1];
+/** Optimize CUT uses landing-page camp id: /v2/landingPage?id={campaignId} */
+export async function updateCutValue(campaignId, cutValue) {
+  const id = String(campaignId ?? '').trim();
+  if (!id || id === '-') {
+    throw new Error('Missing campaign id for CUT update');
   }
-  return campaignId;
-}
-
-export async function updateCutValue(campaignId, links, cutValue) {
-  const id = resolveCutId(campaignId, links);
   const url = `${OPTIMIZE_CUT_API}?id=${encodeURIComponent(id)}&cut=${encodeURIComponent(cutValue)}`;
 
   const res = await fetch(url, {
